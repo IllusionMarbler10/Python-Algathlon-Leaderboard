@@ -1,4 +1,5 @@
 import pygame #type: ignore
+import time
 import random
 
 # Initialize Pygame
@@ -8,12 +9,11 @@ pygame.init()
 WIDTH = 1200
 HEIGHT = 700
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Leaderboard - Animation")
+pygame.display.set_caption("Leaderboard - Animation (Episode / Multi-Day System)")
 
 # ==========================================
-# SECTION TO ADD OR MODIFY ATHLETES
+# SECTION TO ADD OR MODIFY ATHLETES & CONFIG
 # ==========================================
-# You can add as many athletes as you want simply by adding elements to these lists.
 ATHLETE_NAMES = [
     "Athlete 1", 
     "Athlete 2", 
@@ -23,15 +23,19 @@ ATHLETE_NAMES = [
     "Athlete 6", 
     "Athlete 7", 
     "Athlete 8",
-    "Athlete 9",
-    "Athlete 10",
-    "Athlete 11",
-    "Athlete 12", 
-    "Athlete 13"
+    "Athlete 9"
 ]
 
-INITIAL_POINTS = [400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 2000, 300, 100]
-POINTS_TO_ADD  = [600, 400, 500, 300, 700, 200, 450, 350, 550, 250, 500, 100, 50]
+INITIAL_POINTS = [400, 500, 600, 700, 800, 900, 1000, 1500, 1200]
+POINTS_TO_ADD  = [100, 200, 150, 250, 100, 300, 450, 200, 350]
+
+# SAFE_ATHLETES: Number of athletes that are safe in this episode/round. 
+# Athletes ranked below this safe count will be marked as ELIMINATED.
+SAFE_ATHLETES = 5
+
+# PRE_ELIMINATED_INDICES: List of athlete indices already eliminated in previous episodes/days.
+# For example, if Athlete index 7 (Athlete 8) was eliminated in Day 1, include it here.
+PRE_ELIMINATED_INDICES = [0, 1] 
 
 COLORS = [
     (231, 76, 60),    # Red
@@ -42,11 +46,7 @@ COLORS = [
     (26, 188, 156),   # Turquoise
     (230, 126, 34),   # Orange
     (149, 165, 166),  # Light Gray
-    (243, 156, 18),   # Extra Color
-    (255, 255, 0),    # Extra Color
-    (255, 0, 0), 
-    (255, 0, 255),
-    (255, 255, 255)
+    (0, 255, 0)  # Light Gray
 ]
 # ==========================================
 
@@ -62,11 +62,11 @@ eliminated_font = pygame.font.SysFont("Arial", 22, bold=True, italic=True)
 
 # Dynamic layout parameters based on the number of athletes
 TOTAL_ATHLETES = len(ATHLETE_NAMES)
-X_NAMES = 130          # Fixed left position for athlete names
-X_BAR = 250            # Starting position for the score bars
+X_NAMES = 130          # Fixed left position for athlete names outside the bar
+X_BAR = 290            # Starting position for the score bars
 Y_INITIAL = 40  
-SPACING_Y = min(50, (HEIGHT - 80) // max(TOTAL_ATHLETES, 1))
-BAR_HEIGHT = max(10, SPACING_Y - 12)
+SPACING_Y = min(60, (HEIGHT - 80) // max(TOTAL_ATHLETES, 1))
+BAR_HEIGHT = max(10, SPACING_Y - 14)
 MAX_BAR_WIDTH = 600
 LEFT_MARGIN_WIDTH = 110
 
@@ -80,23 +80,29 @@ class AthleteData:
         # Color assignment is strictly tied to the athlete's original index
         self.color = COLORS[index % len(COLORS)]
         
-        # Y positions for smooth sorting animation
-        self.current_y_pos = float(Y_INITIAL + (index * SPACING_Y))
+        # Initial positions
+        self.current_y_pos = float(Y_INITIAL - (index * SPACING_Y))
         self.target_y_pos = self.current_y_pos
-        self.eliminated = False
+        
+        # Check if already eliminated from previous episodes
+        self.eliminated = index in PRE_ELIMINATED_INDICES
 
-# Create athlete list
+# Create athlete list and sort initially from lowest initial score (bottom) to highest initial score (top)
 athletes = [AthleteData(i) for i in range(TOTAL_ATHLETES)]
+athletes.sort(key=lambda a: a.initial_points) 
+for i, athlete in enumerate(athletes):
+    athlete.current_y_pos = float(Y_INITIAL - (i * SPACING_Y) + 480) # This is made for placing the athletes' initial positions, adjust this number until you feel you like it...
+    athlete.target_y_pos = athlete.current_y_pos
 
 clock = pygame.time.Clock()
 
 # Sequence state control:
-# 0: Initial delay (3s)
+# 0: Initial wait (3s)
 # 1: Bar growth (3s)
 # 2: Pause after growth (3s exact)
-# 3: Smooth reordering from highest to lowest
+# 3: Smooth reordering from highest to lowest (3s)
 # 4: 3s pause after sorting
-# 5: Display "ELIMINATED" on the last place and hold state
+# 5: Display "ELIMINATED" on athletes ranked below SAFE_ATHLETES and hold state
 sequence_state = 0
 state_time = pygame.time.get_ticks()
 
@@ -141,13 +147,16 @@ def draw_scene():
 
         # 4. Score text at the far right of the bar
         score_text = normal_font.render(str(int(athlete.current_points)), True, WHITE)
-        score_rect = score_text.get_rect(left=X_BAR + bar_width + 15, centery=y + BAR_HEIGHT // 2)
+        score_rect = score_text.get_rect(left=X_BAR + MAX_BAR_WIDTH + 15, centery=y + BAR_HEIGHT // 2)
         screen.blit(score_text, score_rect)
 
-        # 5. Show "ELIMINATED" in the last position when state is reached
-        if athlete.eliminated and sequence_state >= 5:
+        # 5. Show "ELIMINATED" if athlete was pre-eliminated or eliminated in current episode
+        is_pre_eliminated = athlete.index in PRE_ELIMINATED_INDICES
+        is_new_eliminated = sequence_state >= 5 and athlete.eliminated
+
+        if is_pre_eliminated or is_new_eliminated:
             elim_text = eliminated_font.render("ELIMINATED", True, RED_ELIMINATED)
-            elim_rect = elim_text.get_rect(left=X_BAR + MAX_BAR_WIDTH + 100, centery=y + BAR_HEIGHT // 2)
+            elim_rect = elim_text.get_rect(left=X_BAR + MAX_BAR_WIDTH + 130, centery=y + BAR_HEIGHT // 2)
             screen.blit(elim_text, elim_rect)
 
     pygame.display.flip()
@@ -191,10 +200,10 @@ while running:
 
     elif sequence_state == 3:
         # State 3: Smooth reordering from highest to lowest score
-        progress = min(1.0, (pygame.time.get_ticks() - state_time) / 2000.0)
+        progress = min(1.0, (pygame.time.get_ticks() - state_time) / 1500.0)
         
         for athlete in athletes:
-            athlete.current_y_pos += (athlete.target_y_pos - athlete.current_y_pos) * 0.15
+            athlete.current_y_pos += (athlete.target_y_pos - athlete.current_y_pos) * 0.1
 
         if progress >= 1.0:
             for athlete in athletes:
@@ -209,10 +218,11 @@ while running:
             state_time = pygame.time.get_ticks()
 
     elif sequence_state == 5:
-        # State 5: Mark the last athlete (bottom position) as eliminated
+        # State 5: Mark all athletes ranked below SAFE_ATHLETES as eliminated
         sorted_by_y = sorted(athletes, key=lambda a: a.current_y_pos)
-        if sorted_by_y:
-            sorted_by_y[-1].eliminated = True
+        for i, athlete in enumerate(sorted_by_y):
+            if i >= SAFE_ATHLETES:
+                athlete.eliminated = True
         sequence_state = 6 # Final static state
 
     draw_scene()
